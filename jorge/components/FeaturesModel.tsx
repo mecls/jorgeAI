@@ -26,7 +26,7 @@ export default function FeaturesModel({
                 <View style={styles.modalContent}>
                     <TouchableOpacity style={styles.menuItem}>
                         <MaterialIcons name="attach-file" size={20} color="white" />
-                        <Text style={styles.menuText}>Add photos & files</Text>
+                        <Text style={styles.menuText}>Add files</Text>
                     </TouchableOpacity>
                     <TouchableOpacity style={styles.menuItem}>
                         <MaterialIcons name="graphic-eq" size={20} color="white" />

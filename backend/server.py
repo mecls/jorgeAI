@@ -17,7 +17,7 @@ app.add_middleware(
 
 class ChatRequest(BaseModel):
     prompt: str
-    model: str = "gemma2:latest"
+    model: str = "llama3.2:3B"
 
 
 @app.post("/chat")
@@ -27,10 +27,10 @@ async def generate_chat(request: ChatRequest):
             model=request.model,
             messages=[{"role": "user", "content": request.prompt}],
             stream=False,
-            # To try and not let the pc lag -> FIND BETTER SOLUTION AND RUNNING BIGGER MODEL
+            # To try and not let the pc lag -> NEED 2 FIND BETTER SOLUTION AND RUNNIG BIGGER MODEL
             options={
                 "num_ctx": 2048,  # Reduced from default 4096
-                "num_thread": 4,  # Limit CPU threads
+                # "num_thread": 4,  # Limit CPU threads
             },
         )
         return {"response": response.message.content}
