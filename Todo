@@ -1,7 +1,7 @@
 Priority
 - Generating response UI animation [done]
 - Implement PSQL to save chat [done]
-- Improve chat coice UI/UX []
-- Chat name is Firs question []
+- Improve chat coice UI/UX [done]
+- chat CRUD []
 - Implement Add files feature []
 - Change from OLLAMA to transformers []

@@ -12,11 +12,14 @@ import {
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import FontAwesome from '@expo/vector-icons/FontAwesome';
 import AntDesign from '@expo/vector-icons/AntDesign';
+import Entypo from '@expo/vector-icons/Entypo';
 import React, { useEffect, useRef, useState } from 'react';
 import { ThemedView } from '@/components/themed-view';
 import { ThemedText } from '@/components/themed-text';
 import FeaturesModel from '@/components/FeaturesModel';
 import { useDatabase } from '@/providers/DatabaseProvider'; // CHANGED: removed DatabaseProvider import
+import { IconSymbol } from '@/components/ui/icon-symbol';
+import ChatSelectionModel from '@/components/ChatSelectionModel';
 
 function TypingDots() {
   const a1 = useRef(new Animated.Value(0.3)).current;
@@ -61,12 +64,10 @@ export default function HomeScreen() {
   const [convoPickerVisible, setConvoPickerVisible] = useState(false);
 
   const {
-    conversations,
     activeConversationId,
     messages,
     loading,
     refreshConversations,
-    createConversation,
     openConversation,
     sendMessage,
   } = useDatabase();
@@ -99,6 +100,12 @@ export default function HomeScreen() {
 
   return (
     <ThemedView style={styles.container}>
+      <TouchableOpacity
+        style={{ flex: 1, position: 'absolute', left: 24, top: 80, zIndex: 10 }}
+        onPress={() => setConvoPickerVisible(true)}
+      >
+        <Entypo name="chat" size={24} color="white" />
+      </TouchableOpacity>
       <ScrollView ref={scrollRef} style={styles.chatContainer} contentContainerStyle={{ paddingBottom: 20 }}>
         {messages.length === 0 ? (
           <ThemedText style={{ textAlign: 'center', marginTop: 50, opacity: 0.5 }}>
@@ -126,7 +133,7 @@ export default function HomeScreen() {
         keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 20}
       >
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-          <TouchableOpacity style={styles.sendButton} onPress={() => setConvoPickerVisible(true)}>
+          <TouchableOpacity style={styles.sendButton} onPress={() => setFeaturesVisible(true)}>
             <AntDesign name="plus" size={18} color="white" />
           </TouchableOpacity>
 
@@ -143,7 +150,7 @@ export default function HomeScreen() {
             />
           </View>
 
-          <TouchableOpacity style={styles.sendButton} onPress={() => setFeaturesVisible(true)}>
+          <TouchableOpacity style={styles.sendButton} >
             <FontAwesome name="microphone" size={21} color="white" />
           </TouchableOpacity>
 
@@ -153,56 +160,11 @@ export default function HomeScreen() {
         </View>
       </KeyboardAvoidingView>
 
-      {/* Conversation picker modal */}
-      <Modal
-        visible={convoPickerVisible}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setConvoPickerVisible(false)}
-      >
-        <TouchableOpacity
-          style={styles.backdrop}
-          activeOpacity={1}
-          onPress={() => setConvoPickerVisible(false)}
-        >
-          {/* CHANGED: prevent taps inside the card from closing the modal */}
-          <TouchableOpacity activeOpacity={1} onPress={(e: any) => e?.stopPropagation?.()}>
-            <View style={styles.picker}>
-              <TouchableOpacity
-                style={styles.pickerItem}
-                onPress={async () => {
-                  const convo = await createConversation('New chat');
-                  await openConversation(convo.id);
-                  setConvoPickerVisible(false);
-                }}
-              >
-                <ThemedText>+ New conversation</ThemedText>
-              </TouchableOpacity>
-
-              <View style={styles.pickerDivider} />
-
-              {conversations.map(c => (
-                <TouchableOpacity
-                  key={c.id}
-                  style={styles.pickerItem}
-                  onPress={async () => {
-                    await openConversation(c.id);
-                    setConvoPickerVisible(false);
-                  }}
-                >
-                  <ThemedText>{c.title ?? `Conversation ${c.id.slice(0, 6)}`}</ThemedText>
-                  {c.id === activeConversationId ? (
-                    <ThemedText style={{ opacity: 0.6 }}> (current)</ThemedText>
-                  ) : null}
-                </TouchableOpacity>
-              ))}
-            </View>
-          </TouchableOpacity>
-        </TouchableOpacity>
-      </Modal>
-
       {featuresVisible && (
         <FeaturesModel visible={featuresVisible} onRequestClose={() => setFeaturesVisible(false)} />
+      )}
+      {convoPickerVisible && (
+        <ChatSelectionModel convoPickerVisible={convoPickerVisible} onRequestClose={() => setConvoPickerVisible(false)} />
       )}
     </ThemedView>
   );
@@ -262,43 +224,5 @@ const styles = StyleSheet.create({
   },
   messageText: {
     fontSize: 15,
-  },
-  // Full-screen tap-to-close overlay for the modal
-  backdrop: {
-    ...StyleSheet.absoluteFillObject,              // cover the whole screen [web:270]
-    backgroundColor: 'rgba(0,0,0,0.25)',
-    justifyContent: 'flex-end',
-    padding: 16,
-  },
-
-  // The conversation picker "card"
-  picker: {
-    width: '100%',
-    maxWidth: 420,
-    alignSelf: 'center',
-    backgroundColor: '#353535',
-    borderRadius: 16,
-    paddingVertical: 8,
-
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.3,
-    shadowRadius: 12,
-    elevation: 10,
-  },
-
-  // Row/button inside the picker
-  pickerItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 12,
-    paddingHorizontal: 14,
-  },
-
-  // Optional: separator line between items
-  pickerDivider: {
-    height: StyleSheet.hairlineWidth,
-    backgroundColor: 'rgba(255,255,255,0.12)',
-    marginHorizontal: 14,
   },
 });
