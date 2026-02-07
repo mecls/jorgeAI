@@ -9,8 +9,11 @@ type DatabaseContextType = {
     messages: Message[];
     loading: boolean;
     error: string | null;
+    activeConversationTitle: string;
 
     refreshConversations: () => Promise<void>;
+    editConversation: (conversationId: string, title: string) => Promise<Conversation>;
+    deleteConversation: (conversationId: string) => Promise<Conversation>
     createConversation: (title?: string) => Promise<Conversation>;
     openConversation: (conversationId: string) => Promise<void>;
     sendMessage: (text: string) => Promise<void>;
@@ -27,6 +30,9 @@ export function DatabaseProvider({ children }: { children: React.ReactNode }) {
     const [messages, setMessages] = useState<Message[]>([]);
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
+
+    const activeConversationTitle =
+        conversations.find(c => c.id === activeConversationId)?.title ?? 'New chat';
 
     const refreshConversations = useCallback(async () => {
         setLoading(true); setError(null);
@@ -45,6 +51,64 @@ export function DatabaseProvider({ children }: { children: React.ReactNode }) {
             setLoading(false);
         }
     }, [activeConversationId]);
+
+    const editConversation = useCallback(async (conversationId: string, title: string) => {
+        const trimmed = title.trim()
+        if (!trimmed) throw new Error('Title is required');
+
+        setError(null);
+
+        const res = await fetch(`${API_BASE}/conversations/${conversationId}`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ title: trimmed }),
+        });
+
+        if (!res.ok) {
+            const t = await res.text();
+            throw new Error(`HTTP ${res.status}: ${t}`);
+        }
+
+        const data = await res.json(); // { conversation: {...} }
+        const updated: Conversation = data.conversation;
+
+        // Update local cache so UI refreshes immediately
+        setConversations(prev =>
+            prev.map(c => (c.id === conversationId ? { ...c, title: updated.title, updated_at: updated.updated_at } : c))
+        );
+
+        return updated;
+    }, []);
+
+    const deleteConversation = useCallback(async (conversationId: string) => {
+        if (!activeConversationId) throw new Error('You need to have an active chat to delete this one');
+
+        setError(null);
+        const res = await fetch(`${API_BASE}/conversations/${conversationId}`, {
+            method: 'DELETE',
+        });
+
+        if (!res.ok) {
+            const t = await res.text();
+            throw new Error(`HTTP ${res.status}: ${t}`);
+        }
+
+        const data = await res.json(); // { conversation: {...} }
+        const updated: Conversation = data.conversation;
+
+        setConversations(prev => prev.filter(c => c.id !== conversationId));
+        if (activeConversationId === conversationId) {
+            setActiveConversationId(prevActive => {
+                // compute next from *current* conversations is tricky here, simplest:
+                return null;
+            });
+            setMessages([]); // clear chat view
+            // Optional: you can call refreshConversations() and then open first conversation
+        }
+
+        return data.conversation as Conversation;
+
+    }, [API_BASE, activeConversationId])
 
     const createConversation = useCallback(async (title?: string) => {
         setError(null);
@@ -155,15 +219,19 @@ export function DatabaseProvider({ children }: { children: React.ReactNode }) {
 
     const value = useMemo(() => ({
         conversations,
+        activeConversationTitle,
         activeConversationId,
         messages,
         loading,
         error,
+
         refreshConversations,
+        deleteConversation,
+        editConversation,
         createConversation,
         openConversation,
         sendMessage,
-    }), [conversations, activeConversationId, messages, loading, error, refreshConversations, createConversation, openConversation, sendMessage]);
+    }), [conversations, activeConversationTitle, activeConversationId, messages, loading, error, refreshConversations, createConversation, openConversation, sendMessage]);
 
     return <DatabaseContext.Provider value={value}>{children}</DatabaseContext.Provider>;
 }

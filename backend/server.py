@@ -37,6 +37,10 @@ class SendMessageBody(BaseModel):
     model: str = "llama3.2:3B"
 
 
+class EditConversationBody(BaseModel):
+    title: str
+
+
 @app.get("/conversations")
 async def list_conversation(user_id: str):
     with get_conn() as conn, conn.cursor() as cur:
@@ -210,4 +214,68 @@ async def send_message(conversation_id: str, body: SendMessageBody):
             "content": assistant_text,
             "created_at": asst_row[1].isoformat(),
         },
+    }
+
+
+@app.patch("/conversations/{conversation_id}")
+async def edit_conversation(conversation_id: str, body: EditConversationBody):
+    title = body.title.strip()
+    if not title:
+        raise HTTPException(status_code=400, detail="title is required")
+
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute(
+            """
+            UPDATE conversations
+            SET title = %s,
+                updated_at = now()
+            WHERE id = %s
+            RETURNING id, title, created_at, updated_at
+            """,
+            (title, conversation_id),
+        )
+        row = cur.fetchone()
+        conn.commit()
+
+    if row is None:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+
+    return {
+        "conversation": {
+            "id": str(row[0]),
+            "title": row[1],
+            "created_at": row[2].isoformat(),
+            "updated_at": row[3].isoformat(),
+        }
+    }
+
+
+@app.delete("/conversations/{conversation_id}")
+async def delete_conversation(conversation_id: str):
+
+    if not conversation_id:
+        raise HTTPException(status_code=400, detail="No conversation found")
+
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute(
+            """
+            DELETE FROM conversations
+            WHERE id = %s
+            RETURNING id, title, created_at, updated_at
+            """,
+            (conversation_id,),
+        )
+        row = cur.fetchone()
+        conn.commit()
+
+    if row is None:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+
+    return {
+        "conversation": {
+            "id": str(row[0]),
+            "title": row[1],
+            "created_at": row[2].isoformat(),
+            "updated_at": row[3].isoformat(),
+        }
     }
