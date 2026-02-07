@@ -1,13 +1,22 @@
-import { KeyboardAvoidingView, Platform, ScrollView, StyleSheet, TextInput, TouchableOpacity, View, ActivityIndicator, Animated } from 'react-native';
+import {
+  KeyboardAvoidingView,
+  Platform,
+  ScrollView,
+  StyleSheet,
+  TextInput,
+  TouchableOpacity,
+  View,
+  Animated,
+  Modal
+} from 'react-native';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import FontAwesome from '@expo/vector-icons/FontAwesome';
-import { ThemedView } from '@/components/themed-view';
-import { useState } from 'react';
 import AntDesign from '@expo/vector-icons/AntDesign';
-import FeaturesModel from '@/components/FeaturesModel';
+import React, { useEffect, useRef, useState } from 'react';
+import { ThemedView } from '@/components/themed-view';
 import { ThemedText } from '@/components/themed-text';
-import React, { useEffect, useRef } from 'react';
-
+import FeaturesModel from '@/components/FeaturesModel';
+import { useDatabase } from '@/providers/DatabaseProvider'; // CHANGED: removed DatabaseProvider import
 
 function TypingDots() {
   const a1 = useRef(new Animated.Value(0.3)).current;
@@ -48,118 +57,157 @@ const dotStyles = StyleSheet.create({
 
 export default function HomeScreen() {
   const [messageText, setMessageText] = useState('');
-  const [modalVisible, setModalVisible] = useState(false);
-  const [messages, setMessages] = useState<Array<{ role: string, content: string }>>([]);
-  const [isGenerating, setIsGenerating] = useState(false);
+  const [featuresVisible, setFeaturesVisible] = useState(false);
+  const [convoPickerVisible, setConvoPickerVisible] = useState(false);
 
-  const sendMessage = async () => {
-    if (!messageText.trim()) return;
+  const {
+    conversations,
+    activeConversationId,
+    messages,
+    loading,
+    refreshConversations,
+    createConversation,
+    openConversation,
+    sendMessage,
+  } = useDatabase();
 
-    // setIsGenerating(true)
-    // //Add user message to chat
-    // const userMessage = { role: 'user', content: messageText };
-    // setMessages(prev => [...prev, userMessage]);
-    // setMessageText(''); // Clear input immediately
-    // (Optional) add placeholder assistant bubble immediately
-    setMessages(prev => [...prev, { role: 'user', content: messageText }, { role: 'assistant', content: '' }]);
-    const prompt = messageText;
+  const scrollRef = useRef<ScrollView>(null);
+
+  useEffect(() => {
+    refreshConversations(); // loads conversations for current EXPO_PUBLIC_USER_ID
+  }, []);
+
+  // CHANGED: only open conversation when the ID changes AND we have one.
+  useEffect(() => {
+    if (activeConversationId) openConversation(activeConversationId);
+  }, [activeConversationId]);
+
+  useEffect(() => {
+    scrollRef.current?.scrollToEnd({ animated: true });
+  }, [messages]);
+
+  // CHANGED: prevent sending while loading or while assistant placeholder exists
+  const isSending = loading || (messages.length > 0 && messages[messages.length - 1].role === 'assistant' && messages[messages.length - 1].content === '');
+
+  const onSend = async () => {
+    const text = messageText.trim();
+    if (!text) return;
+
     setMessageText('');
-
-    try {
-      const response = await fetch('http://192.168.5.56:8000/chat', {  // Changed port to 8000
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          prompt: messageText,
-        })
-      });
-
-      const data = await response.json();
-
-      // Replace last empty assistant bubble with real content
-      setMessages(prev => {
-        const next = [...prev];
-        next[next.length - 1] = { role: 'assistant', content: data.response };
-        return next;
-      });
-    } catch (error) {
-      console.error('Error:', error);
-      setMessages(prev => [...prev, { role: 'error', content: 'Failed to get response' }]);
-    }
-    finally {
-      setIsGenerating(false)
-    }
+    await sendMessage(text); // CHANGED: provider now guarantees convo exists
   };
 
   return (
     <ThemedView style={styles.container}>
-      <ScrollView style={styles.chatContainer} contentContainerStyle={{ paddingBottom: 20 }}>
+      <ScrollView ref={scrollRef} style={styles.chatContainer} contentContainerStyle={{ paddingBottom: 20 }}>
         {messages.length === 0 ? (
           <ThemedText style={{ textAlign: 'center', marginTop: 50, opacity: 0.5 }}>
-            Start a conversation...
+            {loading ? 'Loading...' : 'Start a conversation...'}
           </ThemedText>
         ) : (
           messages.map((msg, index) => (
             <View
               key={index}
-              style={[
-                styles.messageBubble,
-                msg.role === 'user' ? styles.userMessage : styles.aiMessage
-              ]}
+              style={[styles.messageBubble, msg.role === 'user' ? styles.userMessage : styles.aiMessage]}
             >
-              {/* {msg.role === 'assistant' && msg.content === '' ? (
-                <ActivityIndicator size="small" color="#fff" />
+              {msg.role === 'assistant' && msg.content === '' ? (
+                <TypingDots />
               ) : (
                 <ThemedText>{msg.content}</ThemedText>
-              )} */}
-              {msg.role === 'assistant' && msg.content === '' ? <TypingDots /> : <ThemedText>{msg.content}</ThemedText>}
+              )}
             </View>
           ))
         )}
       </ScrollView>
+
       <KeyboardAvoidingView
         style={styles.textBoxContainer}
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
         keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 20}
       >
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-          <TouchableOpacity
-            style={styles.sendButton}
-            onPress={() => { setModalVisible(true) }}
-          >
+          <TouchableOpacity style={styles.sendButton} onPress={() => setConvoPickerVisible(true)}>
             <AntDesign name="plus" size={18} color="white" />
           </TouchableOpacity>
+
           <View style={{ flex: 1 }}>
             <TextInput
               value={messageText}
               onChangeText={setMessageText}
               placeholderTextColor={'#fff'}
               style={{ color: '#fff' }}
-              placeholder="Type your message..." />
+              placeholder="Type your message..."
+              onSubmitEditing={onSend}
+              returnKeyType="send"
+              editable={!isSending} // CHANGED: lock input while sending/typing
+            />
           </View>
-          <TouchableOpacity
-            style={styles.sendButton}
-            onPress={() => { setModalVisible(true) }}
-          >
+
+          <TouchableOpacity style={styles.sendButton} onPress={() => setFeaturesVisible(true)}>
             <FontAwesome name="microphone" size={21} color="white" />
           </TouchableOpacity>
-          <TouchableOpacity
-            style={styles.sendButton}
-            onPress={sendMessage}
-          >
-            <MaterialIcons name="send" size={24} color="white" />
+
+          <TouchableOpacity style={styles.sendButton} onPress={onSend} disabled={isSending}>
+            <MaterialIcons name="send" size={24} color={isSending ? 'rgba(255,255,255,0.4)' : 'white'} />
           </TouchableOpacity>
         </View>
       </KeyboardAvoidingView>
-      {modalVisible && (
-        <FeaturesModel
-          visible={modalVisible}
-          onRequestClose={() => setModalVisible(false)}
-        />
+
+      {/* Conversation picker modal */}
+      <Modal
+        visible={convoPickerVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setConvoPickerVisible(false)}
+      >
+        <TouchableOpacity
+          style={styles.backdrop}
+          activeOpacity={1}
+          onPress={() => setConvoPickerVisible(false)}
+        >
+          {/* CHANGED: prevent taps inside the card from closing the modal */}
+          <TouchableOpacity activeOpacity={1} onPress={(e: any) => e?.stopPropagation?.()}>
+            <View style={styles.picker}>
+              <TouchableOpacity
+                style={styles.pickerItem}
+                onPress={async () => {
+                  const convo = await createConversation('New chat');
+                  await openConversation(convo.id);
+                  setConvoPickerVisible(false);
+                }}
+              >
+                <ThemedText>+ New conversation</ThemedText>
+              </TouchableOpacity>
+
+              <View style={styles.pickerDivider} />
+
+              {conversations.map(c => (
+                <TouchableOpacity
+                  key={c.id}
+                  style={styles.pickerItem}
+                  onPress={async () => {
+                    await openConversation(c.id);
+                    setConvoPickerVisible(false);
+                  }}
+                >
+                  <ThemedText>{c.title ?? `Conversation ${c.id.slice(0, 6)}`}</ThemedText>
+                  {c.id === activeConversationId ? (
+                    <ThemedText style={{ opacity: 0.6 }}> (current)</ThemedText>
+                  ) : null}
+                </TouchableOpacity>
+              ))}
+            </View>
+          </TouchableOpacity>
+        </TouchableOpacity>
+      </Modal>
+
+      {featuresVisible && (
+        <FeaturesModel visible={featuresVisible} onRequestClose={() => setFeaturesVisible(false)} />
       )}
     </ThemedView>
   );
 }
+
 
 const styles = StyleSheet.create({
   container: {
@@ -214,5 +262,43 @@ const styles = StyleSheet.create({
   },
   messageText: {
     fontSize: 15,
-  }
+  },
+  // Full-screen tap-to-close overlay for the modal
+  backdrop: {
+    ...StyleSheet.absoluteFillObject,              // cover the whole screen [web:270]
+    backgroundColor: 'rgba(0,0,0,0.25)',
+    justifyContent: 'flex-end',
+    padding: 16,
+  },
+
+  // The conversation picker "card"
+  picker: {
+    width: '100%',
+    maxWidth: 420,
+    alignSelf: 'center',
+    backgroundColor: '#353535',
+    borderRadius: 16,
+    paddingVertical: 8,
+
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.3,
+    shadowRadius: 12,
+    elevation: 10,
+  },
+
+  // Row/button inside the picker
+  pickerItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+  },
+
+  // Optional: separator line between items
+  pickerDivider: {
+    height: StyleSheet.hairlineWidth,
+    backgroundColor: 'rgba(255,255,255,0.12)',
+    marginHorizontal: 14,
+  },
 });

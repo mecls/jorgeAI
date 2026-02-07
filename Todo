@@ -1,6 +1,7 @@
 Priority
 - Generating response UI animation [done]
-- ChromaDB saving chat history []
+- Implement PSQL to save chat [done]
+- Improve chat coice UI/UX []
+- Chat name is Firs question []
 - Implement Add files feature []
-- Implement Research mode []
-- Improve chain of thought with Langchain []
+- Change from OLLAMA to transformers []
