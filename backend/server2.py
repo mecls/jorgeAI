@@ -1,25 +1,51 @@
 import os
 import uuid
 from typing import Optional
-
+from httpcore import request
 import psycopg
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from ollama import chat
+from contextlib import asynccontextmanager
+import torch
+from transformers import AutoTokenizer, AutoModelForCausalLM
 
-DATABASE_URL = os.environ.get(
-    "DATABASE_URL",
-    "postgresql://postgres:postgres@localhost:5432/jorge_ai",
-)
+MODEL_ID = "Qwen/Qwen2.5-3B-Instruct"
 
-app = FastAPI()
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    os.environ.setdefault(
+        "PYTORCH_ENABLE_MPS_FALLBACK", "1"
+    )  # optional safety [web:648]
+
+    device = torch.device(
+        "mps" if torch.backends.mps.is_available() else "cpu"
+    )  # M1 GPU via MPS [web:631]
+
+    tokenizer = AutoTokenizer.from_pretrained(MODEL_ID)
+    model = AutoModelForCausalLM.from_pretrained(MODEL_ID)
+    model.to(device)  # type: ignore
+    model.eval()
+
+    app.state.tokenizer = tokenizer
+    app.state.model = model
+    app.state.device = device
+
+    yield
+
+
+app = FastAPI(lifespan=lifespan)  # load once at startup [web:608]
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],  # tighten in prod
     allow_methods=["*"],
     allow_headers=["*"],
+)
+DATABASE_URL = os.environ.get(
+    "DATABASE_URL",
+    "postgresql://postgres:postgres@localhost:5432/jorge_ai",
 )
 
 
@@ -34,7 +60,7 @@ class CreateConversationBody(BaseModel):
 
 class SendMessageBody(BaseModel):
     content: str
-    model: str = "qwen3:8b"
+    model: str = "llama3.2:3B"
 
 
 class EditConversationBody(BaseModel):
@@ -173,12 +199,26 @@ async def send_message(conversation_id: str, body: SendMessageBody):
         ctx = list(reversed(cur.fetchall()))
         conn.commit()
 
-    ollama_messages = [{"role": role, "content": content} for (role, content) in ctx]
+    tokenizer = request.app.state.tokenizer
+    model = request.app.state.model
 
-    # 2) Call Ollama
-    resp = chat(model=body.model, messages=ollama_messages, stream=False)
-    assistant_text = resp.message.content
+    messages = [{"role": role, "content": content} for (role, content) in ctx]
 
+    # 2) Call Qwen2.5
+    inputs = tokenizer.apply_chat_template(
+        messages,
+        add_generation_prompt=True,
+        tokenize=True,
+        return_tensors="pt",
+    ).to(model.device)
+
+    with torch.inference_mode():
+        outputs = model.generate(**inputs, max_new_tokens=40)
+
+    new_tokens = outputs[0][inputs.shape[-1] :]
+    assistant_text = tokenizer.decode(
+        new_tokens, skip_special_tokens=True
+    ).strip()  # Decode Text to [web:260]
     # 3) Insert assistant + bump updated_at
     with get_conn() as conn, conn.cursor() as cur:
         cur.execute(

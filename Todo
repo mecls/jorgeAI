@@ -2,6 +2,6 @@ Priority
 - Generating response UI animation [done]
 - Implement PSQL to save chat [done]
 - Improve chat coice UI/UX [done]
-- chat CRUD []
+- chat CRUD [done]
 - Implement Add files feature []
 - Change from OLLAMA to transformers []
