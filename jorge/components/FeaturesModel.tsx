@@ -1,14 +1,50 @@
 import { Modal, StyleSheet, Text, View, TouchableOpacity, Image } from 'react-native'
-import React from 'react'
+import React, { useState } from 'react'
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
+import * as DocumentPicker from 'expo-document-picker'
+import { DatabaseProvider, useDatabase } from '@/providers/DatabaseProvider';
 
-export default function FeaturesModel({
-    visible,
-    onRequestClose
-}: {
-    visible: boolean;
-    onRequestClose: () => void
-}) {
+
+type PickedFile = {
+    uri: string;
+    name: string;
+    mimeType?: string;
+    size: number;
+};
+
+export default function FeaturesModel({ visible, onRequestClose }: { visible: boolean; onRequestClose: () => void }) {
+    const API_BASE = process.env.EXPO_PUBLIC_API_BASE!;
+    const { activeConversationId } = useDatabase()
+
+    async function addFile() {
+
+        const result = await DocumentPicker.getDocumentAsync({
+            multiple: true,
+            copyToCacheDirectory: true,
+            type: ['application/pdf', 'image/*', 'application/vnd.openxmlformats-officedocument.presentationml.presentation'],
+        }); // [web:863]
+
+        if (result.canceled) return;
+        const a = result.assets?.[0];
+        if (!a?.uri) return;
+
+        const form = new FormData();
+        form.append('file', {
+            uri: a.uri,
+            name: a.name ?? 'upload',
+            type: a.mimeType ?? 'application/octet-stream',
+        } as any);
+
+        const res = await fetch(`${API_BASE}/conversations/${activeConversationId}/files`, {
+            method: 'POST',
+            body: form,
+        });
+
+        if (!res.ok) throw new Error(await res.text());
+        const data = await res.json();
+        // update UI state if you want (files list)
+    }
+
     return (
         <Modal
             visible={visible}
@@ -24,7 +60,7 @@ export default function FeaturesModel({
             >
                 {/* Menu positioned at bottom-right */}
                 <View style={styles.modalContent}>
-                    <TouchableOpacity style={styles.menuItem}>
+                    <TouchableOpacity style={styles.menuItem} onPress={addFile}>
                         <MaterialIcons name="attach-file" size={20} color="white" />
                         <Text style={styles.menuText}>Add files</Text>
                     </TouchableOpacity>

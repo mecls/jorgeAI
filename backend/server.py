@@ -1,12 +1,15 @@
 import os
 import uuid
 from typing import Optional
-
 import psycopg
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from ollama import chat
+from pathlib import Path
+from pypdf import PdfReader  # for PDFs [web:886]
+from pptx import Presentation  # for PPTX (python-pptx)
+
 
 DATABASE_URL = os.environ.get(
     "DATABASE_URL",
@@ -34,7 +37,7 @@ class CreateConversationBody(BaseModel):
 
 class SendMessageBody(BaseModel):
     content: str
-    model: str = "qwen3:8b"
+    model: str = "qwen3:4b"
 
 
 class EditConversationBody(BaseModel):
@@ -278,4 +281,85 @@ async def delete_conversation(conversation_id: str):
             "created_at": row[2].isoformat(),
             "updated_at": row[3].isoformat(),
         }
+    }
+
+
+# --------- FILE TREATMENT -----------
+UPLOAD_DIR = Path(os.environ.get("UPLOAD_DIR", "./uploads"))
+UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+
+
+@app.post("/conversations/{conversation_id}/files")
+async def upload_conversation_file(conversation_id: str, file: UploadFile = File(...)):
+    if not file.filename:
+        raise HTTPException(status_code=400, detail="filename is required")
+
+    mime = file.content_type or "application/octet-stream"
+
+    # guarda no disco
+    safe_ext = Path(file.filename).suffix.lower()
+    stored_name = f"{uuid.uuid4().hex}{safe_ext}"
+    dst = UPLOAD_DIR / stored_name
+
+    size = 0
+    with dst.open("wb") as f:
+        while True:
+            chunk = await file.read(1024 * 1024)
+            if not chunk:
+                break
+            size += len(chunk)
+            f.write(chunk)
+
+    # regista na DB
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute(
+            """
+            INSERT INTO conversation_files (conversation_id, filename, mime_type, size_bytes, storage_path)
+            VALUES (%s, %s, %s, %s, %s)
+            RETURNING id, created_at
+            """,
+            (conversation_id, file.filename, mime, size, str(dst)),
+        )
+        row = cur.fetchone()
+        conn.commit()
+
+    if row is None:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    return {
+        "file": {
+            "id": row[0],
+            "conversation_id": conversation_id,
+            "filename": file.filename,
+            "mime_type": mime,
+            "size_bytes": size,
+            "created_at": row[1].isoformat(),
+        }
+    }
+
+
+@app.get("/conversations/{conversation_id}/files")
+async def list_conversation_files(conversation_id: str):
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute(
+            """
+            SELECT id, filename, mime_type, size_bytes, created_at
+            FROM conversation_files
+            WHERE conversation_id = %s
+            ORDER BY id DESC
+            """,
+            (conversation_id,),
+        )
+        rows = cur.fetchall()
+
+    return {
+        "files": [
+            {
+                "id": r[0],
+                "filename": r[1],
+                "mime_type": r[2],
+                "size_bytes": r[3],
+                "created_at": r[4].isoformat(),
+            }
+            for r in rows
+        ]
     }
