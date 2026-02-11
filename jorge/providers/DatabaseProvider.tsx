@@ -1,15 +1,26 @@
 import React, { createContext, useCallback, useContext, useMemo, useState } from 'react';
+import * as DocumentPicker from 'expo-document-picker'
 
 type Conversation = { id: string; title: string | null; updated_at: string };
 type Message = { id?: number; role: 'user' | 'assistant' | 'system' | 'error'; content: string; created_at?: string };
+
+export type ConversationFile = {
+    id: number;
+    filename: string;
+    mime_type: string | null;
+    size_bytes: number | null;
+    created_at: string;
+};
 
 type DatabaseContextType = {
     conversations: Conversation[];
     activeConversationId: string | null;
     messages: Message[];
+    activeConversationTitle: string;
+    conversationFiles: ConversationFile[];
+
     loading: boolean;
     error: string | null;
-    activeConversationTitle: string;
 
     refreshConversations: () => Promise<void>;
     editConversation: (conversationId: string, title: string) => Promise<Conversation>;
@@ -17,6 +28,10 @@ type DatabaseContextType = {
     createConversation: (title?: string) => Promise<Conversation>;
     openConversation: (conversationId: string) => Promise<void>;
     sendMessage: (text: string) => Promise<void>;
+
+    refreshConversationFiles: (conversationId: string) => Promise<void>;
+    uploadConversationFiles: (conversationId: string) => Promise<void>;
+    deleteConversationFiles: (conversationId: string, fileId: number) => Promise<void>;
 };
 
 const DatabaseContext = createContext<DatabaseContextType | null>(null);
@@ -24,12 +39,21 @@ const DatabaseContext = createContext<DatabaseContextType | null>(null);
 const API_BASE = process.env.EXPO_PUBLIC_API_BASE!;
 const USER_ID = process.env.EXPO_PUBLIC_USER_ID!;
 
+async function mustJson(res: Response) {
+    if (!res.ok) {
+        const t = await res.text();
+        throw new Error(`HTTP ${res.status}: ${t}`);
+    }
+    return await res.json();
+}
+
 export function DatabaseProvider({ children }: { children: React.ReactNode }) {
     const [conversations, setConversations] = useState<Conversation[]>([]);
     const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
     const [messages, setMessages] = useState<Message[]>([]);
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
+    const [conversationFiles, setConversationFiles] = useState<ConversationFile[]>([]);
 
     const activeConversationTitle =
         conversations.find(c => c.id === activeConversationId)?.title ?? 'New chat';
@@ -139,6 +163,13 @@ export function DatabaseProvider({ children }: { children: React.ReactNode }) {
         }
     }, []);
 
+    const refreshConversationFiles = useCallback(async (conversationId: string) => {
+        setError(null);
+        const res = await fetch(`${API_BASE}/conversations/${conversationId}/files`);
+        const data = await mustJson(res);
+        setConversationFiles((data.files ?? []) as ConversationFile[]);
+    }, [conversationFiles]);
+
     const ensureActiveConversation = useCallback(async (): Promise<string> => {
         // If already selected, use it.
         if (activeConversationId) return activeConversationId;
@@ -169,6 +200,50 @@ export function DatabaseProvider({ children }: { children: React.ReactNode }) {
         return convo.id;
     }, [activeConversationId, conversations, API_BASE]);
 
+    const uploadConversationFiles = useCallback(async (conversationId: string) => {
+        setError(null);
+
+        const result = await DocumentPicker.getDocumentAsync({
+            multiple: true,
+            copyToCacheDirectory: true,
+            type: [
+                'application/pdf',
+                'image/*',
+                'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+            ],
+        }); // multiple selection returns assets[] [web:863]
+
+        if (result.canceled) return;
+
+        for (const a of result.assets ?? []) {
+            const form = new FormData();
+            form.append('file', {
+                uri: a.uri,
+                name: a.name ?? 'upload',
+                type: a.mimeType ?? 'application/octet-stream',
+            } as any);
+
+            const res = await fetch(`${API_BASE}/conversations/${conversationId}/files`, {
+                method: 'POST',
+                body: form,
+            });
+            await mustJson(res);
+        }
+
+        await refreshConversationFiles(conversationId);
+    }, [refreshConversationFiles]);
+
+    const deleteConversationFiles = useCallback(
+        async (conversationId: string, fileId: number) => {
+            setError(null);
+            const res = await fetch(`${API_BASE}/conversations/${conversationId}/files/${fileId}`, {
+                method: 'DELETE',
+            });
+            await mustJson(res);
+            await refreshConversationFiles(conversationId);
+        },
+        [refreshConversationFiles]
+    );
     const sendMessage = useCallback(async (text: string) => {
         const trimmed = text.trim();
         if (!trimmed) return;
@@ -221,6 +296,7 @@ export function DatabaseProvider({ children }: { children: React.ReactNode }) {
         conversations,
         activeConversationTitle,
         activeConversationId,
+        conversationFiles,
         messages,
         loading,
         error,
@@ -230,8 +306,11 @@ export function DatabaseProvider({ children }: { children: React.ReactNode }) {
         editConversation,
         createConversation,
         openConversation,
+        refreshConversationFiles,
+        deleteConversationFiles,
+        uploadConversationFiles,
         sendMessage,
-    }), [conversations, activeConversationTitle, activeConversationId, messages, loading, error, refreshConversations, createConversation, openConversation, sendMessage]);
+    }), [conversations, activeConversationTitle, activeConversationId, messages, loading, error, refreshConversations, createConversation, openConversation, refreshConversationFiles, sendMessage]);
 
     return <DatabaseContext.Provider value={value}>{children}</DatabaseContext.Provider>;
 }

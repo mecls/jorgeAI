@@ -5,6 +5,7 @@ Priority
 - chat CRUD [done]
 - Implement Add files feature [done]
 - Give files to LLM and make it reply about those files [done]
-- implement view attached files and crud []  
-- Improve reply format (Mobile friendly) []
+- implement view attached files and crud [done]
+- Fix refresh of files after added 
+- Improve reply format (Mobile friendly) [] -- maybe use Spacly
 - Implement voice mode [] 

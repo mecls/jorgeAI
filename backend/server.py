@@ -463,3 +463,36 @@ async def list_conversation_files(conversation_id: str):
             for r in rows
         ]
     }
+
+
+@app.delete("/conversations/{conversation_id}/files/{file_id}")
+async def delete_conversation_file(conversation_id: str, file_id: int):
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute(
+            """
+            SELECT storage_path
+            FROM conversation_files
+            WHERE id = %s AND conversation_id = %s
+            """,
+            (file_id, conversation_id),
+        )
+        row = cur.fetchone()
+
+        if row is None:
+            raise HTTPException(status_code=404, detail="File not found")
+
+        storage_path = row[0]
+
+        cur.execute(
+            "DELETE FROM conversation_files WHERE id = %s AND conversation_id = %s",
+            (file_id, conversation_id),
+        )
+        conn.commit()
+
+    # delete from disk (best effort)
+    try:
+        Path(storage_path).unlink(missing_ok=True)
+    except Exception:
+        pass
+
+    return {"deleted": True, "file_id": file_id}

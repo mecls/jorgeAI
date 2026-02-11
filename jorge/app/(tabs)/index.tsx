@@ -8,64 +8,27 @@ import {
   View,
   Animated,
   Text,
+  Modal,
+  FlatList,
 } from 'react-native';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import FontAwesome from '@expo/vector-icons/FontAwesome';
 import AntDesign from '@expo/vector-icons/AntDesign';
 import Entypo from '@expo/vector-icons/Entypo';
-import { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { ThemedView } from '@/components/themed-view';
 import { ThemedText } from '@/components/themed-text';
 import FeaturesModel from '@/components/FeaturesModel';
-import { useDatabase } from '@/providers/DatabaseProvider'; // CHANGED: removed DatabaseProvider import
+import { useDatabase } from '@/providers/DatabaseProvider';
 import ChatSelectionModel from '@/components/ChatSelectionModel';
 import RenameChatModel from '@/components/RenameChatModel';
-
-export function ThinkingIndicator({ name = "Jorge" }: { name?: string }) {
-  const a1 = useRef(new Animated.Value(0.3)).current;
-  const a2 = useRef(new Animated.Value(0.3)).current;
-  const a3 = useRef(new Animated.Value(0.3)).current;
-
-  useEffect(() => {
-    const pulse = (v: Animated.Value, delay: number) =>
-      Animated.loop(
-        Animated.sequence([
-          Animated.delay(delay),
-          Animated.timing(v, { toValue: 1, duration: 250, useNativeDriver: true }),
-          Animated.timing(v, { toValue: 0.3, duration: 250, useNativeDriver: true }),
-        ])
-      );
-
-    const p1 = pulse(a1, 0);
-    const p2 = pulse(a2, 120);
-    const p3 = pulse(a3, 240);
-
-    p1.start(); p2.start(); p3.start();
-    return () => { p1.stop(); p2.stop(); p3.stop(); };
-  }, [a1, a2, a3]);
-
-  return (
-    <View style={dotStyles.row}>
-      <Text style={dotStyles.text}>{name} is thinking</Text>
-      <View style={dotStyles.dots}>
-        <Animated.View style={[dotStyles.dot, { opacity: a1 }]} />
-        <Animated.View style={[dotStyles.dot, { opacity: a2 }]} />
-        <Animated.View style={[dotStyles.dot, { opacity: a3 }]} />
-      </View>
-    </View>
-  );
-}
-
-const dotStyles = StyleSheet.create({
-  row: { flexDirection: "row", alignItems: "center", gap: 8 },
-  text: { color: "#9aa0a6", fontSize: 14 },
-  dots: { flexDirection: "row", alignItems: "center", gap: 4 },
-  dot: { width: 3, height: 3, borderRadius: 3, backgroundColor: "#9aa0a6" },
-});
+import { ThinkingIndicator } from '@/components/ThinkingIndicator';
+import { AttachmentsModal } from '@/components/AttachmentsModal';
 
 export default function HomeScreen() {
   const [messageText, setMessageText] = useState('');
   const [featuresVisible, setFeaturesVisible] = useState(false);
+  const [attachmentsVisible, setAttachmentsVisible] = useState(false);
   const [convoPickerVisible, setConvoPickerVisible] = useState(false);
 
   const {
@@ -76,12 +39,12 @@ export default function HomeScreen() {
     refreshConversations,
     openConversation,
     sendMessage,
+    conversationFiles,
   } = useDatabase();
 
   const [renameVisible, setRenameVisible] = useState(false);
   const [renameConversationId, setRenameConversationId] = useState<string | null>(null);
   const [renameCurrentTitle, setRenameCurrentTitle] = useState<string | null>(null);
-
   const startRename = (id: string, title?: string | null) => {
     setRenameConversationId(id);
     setRenameCurrentTitle(title ?? null);
@@ -89,8 +52,9 @@ export default function HomeScreen() {
   };
 
   const scrollRef = useRef<ScrollView>(null);
+
   useEffect(() => {
-    refreshConversations(); // loads conversations for current EXPO_PUBLIC_USER_ID
+    refreshConversations();
   }, []);
 
   useEffect(() => {
@@ -101,16 +65,18 @@ export default function HomeScreen() {
     scrollRef.current?.scrollToEnd({ animated: true });
   }, [messages]);
 
-  const isSending = loading || (messages.length > 0 && messages[messages.length - 1].role === 'assistant' && messages[messages.length - 1].content === '');
+  const isSending =
+    loading ||
+    (messages.length > 0 &&
+      messages[messages.length - 1].role === 'assistant' &&
+      messages[messages.length - 1].content === '');
 
   const onSend = async () => {
     const text = messageText.trim();
     if (!text) return;
-
     setMessageText('');
-    await sendMessage(text); // CHANGED: provider now guarantees convo exists
+    await sendMessage(text);
   };
-
 
   return (
     <ThemedView style={styles.container}>
@@ -122,8 +88,8 @@ export default function HomeScreen() {
         <View style={styles.topBarCenter}>
           <TouchableOpacity
             onPress={() => {
-              if (!activeConversationId) return; // no convo yet
-              startRename(activeConversationId, activeConversationTitle); // CHANGED: set id + prefill title
+              if (!activeConversationId) return;
+              startRename(activeConversationId, activeConversationTitle);
             }}
           >
             <ThemedText numberOfLines={1} style={styles.topBarTitle}>
@@ -131,6 +97,23 @@ export default function HomeScreen() {
             </ThemedText>
           </TouchableOpacity>
         </View>
+
+        <TouchableOpacity
+          style={styles.topBarRight}
+          onPress={() => setAttachmentsVisible(true)}
+          disabled={!activeConversationId}
+        >
+          <MaterialIcons
+            name="attach-file"
+            size={24}
+            color={!activeConversationId ? 'rgba(255,255,255,0.35)' : 'white'}
+          />
+          {activeConversationId && conversationFiles.length > 0 ? (
+            <View style={styles.badge}>
+              <Text style={styles.badgeText}>{conversationFiles.length}</Text>
+            </View>
+          ) : null}
+        </TouchableOpacity>
       </View>
 
       <ScrollView ref={scrollRef} style={styles.chatContainer} contentContainerStyle={{ paddingBottom: 20 }}>
@@ -144,11 +127,7 @@ export default function HomeScreen() {
               key={index}
               style={[styles.messageBubble, msg.role === 'user' ? styles.userMessage : styles.aiMessage]}
             >
-              {msg.role === 'assistant' && msg.content === '' ? (
-                <ThinkingIndicator />
-              ) : (
-                <ThemedText>{msg.content}</ThemedText>
-              )}
+              {msg.role === 'assistant' && msg.content === '' ? <ThinkingIndicator /> : <ThemedText>{msg.content}</ThemedText>}
             </View>
           ))
         )}
@@ -173,26 +152,40 @@ export default function HomeScreen() {
               placeholder="Type your message..."
               onSubmitEditing={onSend}
               returnKeyType="send"
-              editable={!isSending} // CHANGED: lock input while sending/typing
+              editable={!isSending}
             />
           </View>
 
-          <TouchableOpacity style={styles.sendButton} >
+          <TouchableOpacity style={styles.sendButton}>
             <FontAwesome name="microphone" size={21} color="white" />
           </TouchableOpacity>
 
           <TouchableOpacity style={styles.sendButton} onPress={onSend} disabled={isSending}>
-            <MaterialIcons name="send" size={24} color={isSending ? 'rgba(255,255,255,0.4)' : 'white'} />
+            <MaterialIcons
+              name="send"
+              size={24}
+              color={isSending ? 'rgba(255,255,255,0.4)' : 'white'}
+            />
           </TouchableOpacity>
         </View>
       </KeyboardAvoidingView>
 
       {featuresVisible && (
-        <FeaturesModel visible={featuresVisible} onRequestClose={() => setFeaturesVisible(false)} />
+        <FeaturesModel
+          visible={featuresVisible}
+          onRequestClose={() => setFeaturesVisible(false)}
+        />
       )}
+
+      <AttachmentsModal visible={attachmentsVisible} onClose={() => setAttachmentsVisible(false)} />
+
       {convoPickerVisible && (
-        <ChatSelectionModel convoPickerVisible={convoPickerVisible} onRequestClose={() => setConvoPickerVisible(false)} />
+        <ChatSelectionModel
+          convoPickerVisible={convoPickerVisible}
+          onRequestClose={() => setConvoPickerVisible(false)}
+        />
       )}
+
       {renameVisible && (
         <RenameChatModel
           renameVisible={renameVisible}
@@ -204,94 +197,38 @@ export default function HomeScreen() {
             setRenameCurrentTitle(null);
           }}
         />
-
       )}
-
     </ThemedView>
   );
 }
 
-
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  titleText: {
-    marginTop: 32,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  chatContainer: {
-    flex: 1,
-    width: '95%',
-    maxHeight: '80%',
-    backgroundColor: 'transparent',
-    padding: 16,
-    top: 48,
-  },
-  textBoxContainer: {
-    width: '95%',
-    height: 50,
-    borderRadius: 25,
-    backgroundColor: '#353535',
-    justifyContent: 'center',
-    paddingHorizontal: 12,
-    top: 24
-  },
-  iconStyle: {
-    marginRight: 8,
-  },
-  sendButton: {
-    padding: 8,
-    borderRadius: 4,
-    backgroundColor: 'transparent',
-  },
-  messageBubble: {
-    padding: 12,
-    borderRadius: 16,
-    marginVertical: 8,
-    maxWidth: '80%',
-  },
-  userMessage: {
-    alignSelf: 'flex-end',
-    backgroundColor: '#353535',
-  },
-  aiMessage: {
-    alignSelf: 'flex-start',
-    backgroundColor: 'transparent',
-  },
-  messageText: {
-    fontSize: 15,
-  },
-  topBar: {
-    position: 'absolute',
-    top: 70,          // adjust for your safe-area preference
-    left: 0,
-    right: 0,
-    height: 44,
-    zIndex: 10,
-    justifyContent: 'center',
-  },
-  topBarLeft: {
-    position: 'absolute',
-    left: 24,
-    height: 44,
-    justifyContent: 'center',
-  },
-  topBarCenter: {
-    alignSelf: 'center',
-    maxWidth: '70%',
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  topBarTitle: {
-    fontSize: 16,
-    fontWeight: '600',
-    textAlign: 'center',
-  },
+  container: { flex: 1, justifyContent: 'center', alignItems: 'center' },
+  chatContainer: { flex: 1, width: '95%', maxHeight: '80%', backgroundColor: 'transparent', padding: 16, top: 48 },
+  textBoxContainer: { width: '95%', height: 50, borderRadius: 25, backgroundColor: '#353535', justifyContent: 'center', paddingHorizontal: 12, top: 24 },
+  sendButton: { padding: 8, borderRadius: 4, backgroundColor: 'transparent' },
+  messageBubble: { padding: 12, borderRadius: 16, marginVertical: 8, maxWidth: '80%' },
+  userMessage: { alignSelf: 'flex-end', backgroundColor: '#353535' },
+  aiMessage: { alignSelf: 'flex-start', backgroundColor: 'transparent' },
 
+  topBar: { position: 'absolute', top: 70, left: 0, right: 0, height: 44, zIndex: 10, justifyContent: 'center' },
+  topBarLeft: { position: 'absolute', left: 24, height: 44, justifyContent: 'center' },
+  topBarCenter: { alignSelf: 'center', maxWidth: '70%', flexDirection: 'row', alignItems: 'center', justifyContent: 'center' },
+  topBarRight: { position: 'absolute', right: 20, height: 44, justifyContent: 'center' },
+
+  topBarTitle: { fontSize: 16, fontWeight: '600', textAlign: 'center' },
+
+  badge: {
+    position: 'absolute',
+    right: -2,
+    top: -2,
+    minWidth: 16,
+    height: 16,
+    paddingHorizontal: 4,
+    borderRadius: 8,
+    backgroundColor: '#ff4d4f',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  badgeText: { color: 'white', fontSize: 10, fontWeight: '700' },
 });
