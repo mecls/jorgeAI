@@ -9,7 +9,7 @@ from ollama import chat
 from pathlib import Path
 from pypdf import PdfReader  # for PDFs [web:886]
 from pptx import Presentation  # for PPTX (python-pptx)
-
+from typing import Any, cast
 
 DATABASE_URL = os.environ.get(
     "DATABASE_URL",
@@ -42,6 +42,63 @@ class SendMessageBody(BaseModel):
 
 class EditConversationBody(BaseModel):
     title: str
+
+
+def extract_text_from_pptx(path: str) -> str:
+    pres = Presentation(path)
+    parts: list[str] = []
+
+    for slide in pres.slides:
+        for shape in slide.shapes:
+            sh = cast(Any, shape)  # Pylance workaround
+            if not sh.has_text_frame:  # documented [web:935]
+                continue
+
+            text = sh.text_frame.text  # documented [web:935]
+            if text and text.strip():
+                parts.append(text.strip())
+
+    return "\n\n".join(parts)
+
+
+def extract_text_for_file(mime: str, path: str) -> str:
+    p = Path(path)
+
+    if mime == "application/pdf":
+        reader = PdfReader(str(p))  # [web:886]
+        return "\n".join((page.extract_text() or "") for page in reader.pages)
+
+    if (
+        mime
+        == "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+    ):
+        return extract_text_from_pptx(str(p))
+
+    # images: not processed yet
+    return ""
+
+
+def build_files_context(conversation_id: str, max_chars: int = 12000) -> str:
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute(
+            """
+            SELECT filename, mime_type, storage_path
+            FROM conversation_files
+            WHERE conversation_id = %s
+            ORDER BY id ASC
+            """,
+            (conversation_id,),
+        )
+        rows = cur.fetchall()
+
+    blocks: list[str] = []
+    for filename, mime, storage_path in rows:
+        text = extract_text_for_file(mime or "", storage_path)
+        if text and text.strip():
+            blocks.append(f"FILE: {filename}\n{text.strip()}")
+
+    ctx = "\n\n---\n\n".join(blocks)
+    return ctx[:max_chars]
 
 
 @app.get("/conversations")
@@ -175,12 +232,55 @@ async def send_message(conversation_id: str, body: SendMessageBody):
         )
         ctx = list(reversed(cur.fetchall()))
         conn.commit()
+        # Load attached files
+        with get_conn() as conn, conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT filename, mime_type, storage_path
+                FROM conversation_files
+                WHERE conversation_id = %s
+                ORDER BY id ASC
+                """,
+                (conversation_id,),
+            )
+            files = cur.fetchall()
 
-    ollama_messages = [{"role": role, "content": content} for (role, content) in ctx]
+        blocks = []
+        for filename, mime, path in files:
+            text = ""
+            if (mime or "").startswith("application/pdf") or str(path).lower().endswith(
+                ".pdf"
+            ):
+                reader = PdfReader(str(path))  # [web:886]
+                text = "\n".join((page.extract_text() or "") for page in reader.pages)
+            elif (mime or "").endswith("presentationml.presentation") or str(
+                path
+            ).lower().endswith(".pptx"):
+                text = extract_text_from_pptx(str(path))
 
-    # 2) Call Ollama
-    resp = chat(model=body.model, messages=ollama_messages, stream=False)
+            if text.strip():
+                blocks.append(f"FILE: {filename}\n{text.strip()}")
+
+        files_text = "\n\n---\n\n".join(blocks)[:12000]
+
+        ollama_messages = [
+            {"role": role, "content": content} for (role, content) in ctx
+        ]
+        if files_text.strip():
+            ollama_messages = [
+                {
+                    "role": "system",
+                    "content": "You are a study assistant. Use the course files below as context.\n\n"
+                    + files_text,
+                }
+            ] + ollama_messages
+
+        resp = chat(
+            model=body.model, messages=ollama_messages, stream=False, think=True
+        )
+
     assistant_text = resp.message.content
+    print("files found:", len(files), "mimes:", [f[1] for f in files])
 
     # 3) Insert assistant + bump updated_at
     with get_conn() as conn, conn.cursor() as cur:

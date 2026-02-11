@@ -7,6 +7,7 @@ import {
   TouchableOpacity,
   View,
   Animated,
+  Text,
 } from 'react-native';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import FontAwesome from '@expo/vector-icons/FontAwesome';
@@ -20,7 +21,7 @@ import { useDatabase } from '@/providers/DatabaseProvider'; // CHANGED: removed 
 import ChatSelectionModel from '@/components/ChatSelectionModel';
 import RenameChatModel from '@/components/RenameChatModel';
 
-function TypingDots() {
+export function ThinkingIndicator({ name = "Jorge" }: { name?: string }) {
   const a1 = useRef(new Animated.Value(0.3)).current;
   const a2 = useRef(new Animated.Value(0.3)).current;
   const a3 = useRef(new Animated.Value(0.3)).current;
@@ -45,16 +46,21 @@ function TypingDots() {
 
   return (
     <View style={dotStyles.row}>
-      <Animated.View style={[dotStyles.dot, { opacity: a1 }]} />
-      <Animated.View style={[dotStyles.dot, { opacity: a2 }]} />
-      <Animated.View style={[dotStyles.dot, { opacity: a3 }]} />
+      <Text style={dotStyles.text}>{name} is thinking</Text>
+      <View style={dotStyles.dots}>
+        <Animated.View style={[dotStyles.dot, { opacity: a1 }]} />
+        <Animated.View style={[dotStyles.dot, { opacity: a2 }]} />
+        <Animated.View style={[dotStyles.dot, { opacity: a3 }]} />
+      </View>
     </View>
   );
 }
 
 const dotStyles = StyleSheet.create({
-  row: { flexDirection: 'row', gap: 6 },
-  dot: { width: 6, height: 6, borderRadius: 3, backgroundColor: '#fff' },
+  row: { flexDirection: "row", alignItems: "center", gap: 8 },
+  text: { color: "#9aa0a6", fontSize: 14 },
+  dots: { flexDirection: "row", alignItems: "center", gap: 4 },
+  dot: { width: 3, height: 3, borderRadius: 3, backgroundColor: "#9aa0a6" },
 });
 
 export default function HomeScreen() {
@@ -87,7 +93,6 @@ export default function HomeScreen() {
     refreshConversations(); // loads conversations for current EXPO_PUBLIC_USER_ID
   }, []);
 
-  // CHANGED: only open conversation when the ID changes AND we have one.
   useEffect(() => {
     if (activeConversationId) openConversation(activeConversationId);
   }, [activeConversationId]);
@@ -96,7 +101,6 @@ export default function HomeScreen() {
     scrollRef.current?.scrollToEnd({ animated: true });
   }, [messages]);
 
-  // CHANGED: prevent sending while loading or while assistant placeholder exists
   const isSending = loading || (messages.length > 0 && messages[messages.length - 1].role === 'assistant' && messages[messages.length - 1].content === '');
 
   const onSend = async () => {
@@ -111,12 +115,9 @@ export default function HomeScreen() {
   return (
     <ThemedView style={styles.container}>
       <View style={styles.topBar}>
-        {/* Left icon (opens chat picker) */}
         <TouchableOpacity style={styles.topBarLeft} onPress={() => setConvoPickerVisible(true)}>
           <Entypo name="chat" size={24} color="white" />
         </TouchableOpacity>
-
-        {/* Center title */}
 
         <View style={styles.topBarCenter}>
           <TouchableOpacity
@@ -144,7 +145,7 @@ export default function HomeScreen() {
               style={[styles.messageBubble, msg.role === 'user' ? styles.userMessage : styles.aiMessage]}
             >
               {msg.role === 'assistant' && msg.content === '' ? (
-                <TypingDots />
+                <ThinkingIndicator />
               ) : (
                 <ThemedText>{msg.content}</ThemedText>
               )}

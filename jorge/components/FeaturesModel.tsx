@@ -25,24 +25,21 @@ export default function FeaturesModel({ visible, onRequestClose }: { visible: bo
         }); // [web:863]
 
         if (result.canceled) return;
-        const a = result.assets?.[0];
-        if (!a?.uri) return;
 
-        const form = new FormData();
-        form.append('file', {
-            uri: a.uri,
-            name: a.name ?? 'upload',
-            type: a.mimeType ?? 'application/octet-stream',
-        } as any);
+        for (const a of result.assets ?? []) {
+            const form = new FormData();
+            form.append('file', {
+                uri: a.uri,
+                name: a.name ?? 'upload',
+                type: a.mimeType ?? 'application/octet-stream',
+            } as any);
 
-        const res = await fetch(`${API_BASE}/conversations/${activeConversationId}/files`, {
-            method: 'POST',
-            body: form,
-        });
-
-        if (!res.ok) throw new Error(await res.text());
-        const data = await res.json();
-        // update UI state if you want (files list)
+            const res = await fetch(`${API_BASE}/conversations/${activeConversationId}/files`, {
+                method: 'POST',
+                body: form,
+            });
+            if (!res.ok) throw new Error(await res.text());
+        }
     }
 
     return (
