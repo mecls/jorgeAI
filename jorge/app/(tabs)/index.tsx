@@ -21,6 +21,7 @@ import ChatSelectionModel from '@/components/ChatSelectionModel';
 import RenameChatModel from '@/components/RenameChatModel';
 import { ThinkingIndicator } from '@/components/ThinkingIndicator';
 import { AttachmentsModal } from '@/components/AttachmentsModal';
+import { MarkdownMessage } from '@/components/MarkdownMessage';
 
 type MessageIntent = 'summary' | 'study_plan' | 'practice_questions' | 'custom';
 type OutputMode = 'quick' | 'full' | 'study_ready';
@@ -120,48 +121,35 @@ export default function HomeScreen() {
       {/* ── Top bar ── */}
       <View style={styles.topBar}>
         <TouchableOpacity style={styles.topBarLeft} onPress={() => setConvoPickerVisible(true)}>
-          <Entypo name="chat" size={22} color="white" />
+          <Entypo name="chat" size={24} color="white" />
         </TouchableOpacity>
 
+        {/* Mode selector pill — centered */}
         <View style={styles.topBarCenter}>
-          <TouchableOpacity
-            onPress={() => {
-              if (!activeConversationId) return;
-              startRename(activeConversationId, activeConversationTitle);
-            }}
-          >
-            <ThemedText numberOfLines={1} style={styles.topBarTitle}>
-              {activeConversationTitle}
-            </ThemedText>
-          </TouchableOpacity>
-        </View>
-
-        <View style={styles.topBarRightRow}>
-          {/* Mode selector pill */}
           <TouchableOpacity style={styles.modePill} onPress={() => setModeDropdownVisible(true)}>
-            <MaterialIcons name={currentMode.icon} size={14} color="white" />
+            <MaterialIcons name={currentMode.icon} size={18} color="white" />
             <Text style={styles.modePillText}>{currentMode.label}</Text>
-            <MaterialIcons name="keyboard-arrow-down" size={16} color="rgba(255,255,255,0.6)" />
-          </TouchableOpacity>
-
-          {/* Attachments */}
-          <TouchableOpacity
-            onPress={() => setAttachmentsVisible(true)}
-            disabled={!activeConversationId}
-            style={styles.topBarAttach}
-          >
-            <MaterialIcons
-              name="attach-file"
-              size={22}
-              color={!activeConversationId ? 'rgba(255,255,255,0.35)' : 'white'}
-            />
-            {activeConversationId && conversationFiles.length > 0 ? (
-              <View style={styles.badge}>
-                <Text style={styles.badgeText}>{conversationFiles.length}</Text>
-              </View>
-            ) : null}
+            <MaterialIcons name="keyboard-arrow-down" size={18} color="rgba(255,255,255,0.6)" />
           </TouchableOpacity>
         </View>
+
+        {/* Attachments */}
+        <TouchableOpacity
+          onPress={() => setAttachmentsVisible(true)}
+          disabled={!activeConversationId}
+          style={styles.topBarRight}
+        >
+          <MaterialIcons
+            name="attach-file"
+            size={24}
+            color={!activeConversationId ? 'rgba(255,255,255,0.35)' : 'white'}
+          />
+          {activeConversationId && conversationFiles.length > 0 ? (
+            <View style={styles.badge}>
+              <Text style={styles.badgeText}>{conversationFiles.length}</Text>
+            </View>
+          ) : null}
+        </TouchableOpacity>
       </View>
 
       {/* ── Chat messages ── */}
@@ -178,6 +166,8 @@ export default function HomeScreen() {
             >
               {msg.role === 'assistant' && msg.content === '' ? (
                 <ThinkingIndicator />
+              ) : msg.role === 'assistant' ? (
+                <MarkdownMessage content={msg.content} />
               ) : (
                 <ThemedText>{msg.content}</ThemedText>
               )}
@@ -332,6 +322,8 @@ const styles = StyleSheet.create({
     zIndex: 10,
     flexDirection: 'row',
     alignItems: 'center',
+    alignSelf: 'center',
+    justifyContent: 'space-between',
     paddingHorizontal: 20,
   },
   topBarLeft: { width: 36, alignItems: 'flex-start', justifyContent: 'center' },
@@ -340,23 +332,19 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  topBarTitle: { fontSize: 16, fontWeight: '600', textAlign: 'center' },
-  topBarRightRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-  },
-  topBarAttach: { position: 'relative' },
+  topBarRight: { width: 36, alignItems: 'flex-end', justifyContent: 'center', position: 'relative' },
   modePill: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 4,
+    justifyContent: 'center',
+    gap: 6,
     backgroundColor: 'rgba(255,255,255,0.1)',
-    paddingHorizontal: 10,
-    paddingVertical: 6,
+    paddingHorizontal: 20,
+    paddingVertical: 8,
     borderRadius: 999,
+    minWidth: 140,
   },
-  modePillText: { color: 'white', fontSize: 12, fontWeight: '600' },
+  modePillText: { color: 'white', fontSize: 14, fontWeight: '600' },
   badge: {
     position: 'absolute',
     right: -4,
@@ -375,10 +363,10 @@ const styles = StyleSheet.create({
   chatContainer: {
     flex: 1,
     width: '95%',
-    maxHeight: '80%',
+    maxHeight: '75%',
     backgroundColor: 'transparent',
     padding: 16,
-    top: 48,
+    top: 52,
   },
   emptyStateText: { textAlign: 'center', marginTop: 50, opacity: 0.5 },
   messageBubble: { padding: 12, borderRadius: 16, marginVertical: 8, maxWidth: '80%' },
@@ -388,8 +376,9 @@ const styles = StyleSheet.create({
   /* ── Quick prompt bubbles ── */
   predefinedContainer: {
     width: '95%',
-    marginBottom: 12,
-    gap: 8,
+    position: 'absolute',
+    bottom: 80,
+    gap: 12,
   },
   quickPromptBubble: {
     backgroundColor: '#2a2a2a',
@@ -409,7 +398,8 @@ const styles = StyleSheet.create({
   /* ── Input area ── */
   inputContainer: {
     width: '95%',
-    marginBottom: 12,
+    position: 'absolute',
+    bottom: 16,
   },
   inputRow: {
     flexDirection: 'row',

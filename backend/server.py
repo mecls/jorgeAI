@@ -1,4 +1,5 @@
 import os
+import re
 import uuid
 from typing import Literal, Optional
 import psycopg
@@ -114,6 +115,55 @@ def build_system_prompt(
     output_mode: Literal["quick", "full", "study_ready"],
     files_text: str,
 ) -> str:
+    markdown_contract = (
+        "Return using the exact Markdown skeleton for the chosen output mode.\n"
+        "Formatting requirements:\n"
+        "- Use Markdown headings that start with '## ' (exactly).\n"
+        "- Use **bold** for key terms.\n"
+        "- Use '-' for bullet lists and '1.' for ordered lists.\n"
+        "- Keep paragraphs short (2-3 sentences max) for mobile readability.\n"
+        "- Use '---' between major sections.\n"
+        "- Use light emojis at the start of section headers (e.g. ## 📝 Summary).\n"
+    )
+
+    markdown_skeletons = {
+        "quick": (
+            "Markdown skeleton (quick):\n"
+            "## 📝 Summary\n\n"
+            "## 🎯 Key Takeaways\n\n"
+            "## ✅ Quick Practice Questions\n\n"
+            "## ❓ Clarifying Questions (only if needed)\n"
+        ),
+        "full": (
+            "Markdown skeleton (full):\n"
+            "## 📝 Summary\n\n"
+            "---\n\n"
+            "## 🎯 Key Concepts\n\n"
+            "---\n\n"
+            "## 🧪 Examples\n\n"
+            "---\n\n"
+            "## ⚠️ Common Pitfalls\n\n"
+            "---\n\n"
+            "## ✅ Practice Questions\n\n"
+            "---\n\n"
+            "## ❓ Clarifying Questions (only if needed)\n"
+        ),
+        "study_ready": (
+            "Markdown skeleton (study_ready):\n"
+            "## 📝 Summary\n\n"
+            "---\n\n"
+            "## 🗓️ 7-Day Study Plan\n\n"
+            "---\n\n"
+            "## 🧠 Flashcards\n\n"
+            "---\n\n"
+            "## ✅ Quiz\n\n"
+            "---\n\n"
+            "## 📌 Revision Checklist\n\n"
+            "---\n\n"
+            "## ❓ Clarifying Questions (only if needed)\n"
+        ),
+    }
+
     mode_rules = {
         "quick": (
             "Output mode: quick.\n"
@@ -161,12 +211,72 @@ def build_system_prompt(
     return (
         grounding_rules
         + "\n"
+        + markdown_contract
+        + "\n"
+        + markdown_skeletons[output_mode]
+        + "\n"
         + mode_rules[output_mode]
         + "\n"
         + intent_rules[intent]
         + "\n\nCourse file context:\n"
         + files_block
     )
+
+
+def ensure_markdown(text: str) -> str:
+    """
+    Best-effort formatter to ensure headings render in Markdown.
+    If the model already produced Markdown headings (##), we leave it unchanged.
+    Otherwise, we upgrade common section titles into Markdown headings with light emojis.
+    """
+
+    if re.search(r"(?m)^##\s+", text):
+        return text
+
+    heading_map: list[tuple[re.Pattern[str], str]] = [
+        (re.compile(r"(?im)^\s*summary\s*:?\s*$"), "## 📝 Summary"),
+        (re.compile(r"(?im)^\s*key\s+concepts\s*:?\s*$"), "## 🎯 Key Concepts"),
+        (re.compile(r"(?im)^\s*key\s+takeaways\s*:?\s*$"), "## 🎯 Key Takeaways"),
+        (re.compile(r"(?im)^\s*examples\s*:?\s*$"), "## 🧪 Examples"),
+        (re.compile(r"(?im)^\s*common\s+pitfalls\s*:?\s*$"), "## ⚠️ Common Pitfalls"),
+        (re.compile(r"(?im)^\s*practice\s+questions\s*:?\s*$"), "## ✅ Practice Questions"),
+        (
+            re.compile(r"(?im)^\s*clarifying\s+questions\s*:?\s*$"),
+            "## ❓ Clarifying Questions",
+        ),
+        (re.compile(r"(?im)^\s*7[- ]day\s+study\s+plan\s*:?\s*$"), "## 🗓️ 7-Day Study Plan"),
+        (re.compile(r"(?im)^\s*flashcards\s*:?\s*$"), "## 🧠 Flashcards"),
+        (re.compile(r"(?im)^\s*quiz\s*:?\s*$"), "## ✅ Quiz"),
+        (re.compile(r"(?im)^\s*revision\s+checklist\s*:?\s*$"), "## 📌 Revision Checklist"),
+    ]
+
+    lines = text.splitlines()
+    out: list[str] = []
+    found_any_heading = False
+
+    for line in lines:
+        replaced = False
+        for pattern, heading in heading_map:
+            if pattern.match(line):
+                # Insert separator between sections (not before the first).
+                if found_any_heading and (len(out) > 0 and out[-1].strip() != "---"):
+                    # Add a clean separator with spacing.
+                    if out[-1].strip() != "":
+                        out.append("")
+                    out.append("---")
+                    out.append("")
+
+                out.append(heading)
+                out.append("")  # blank line after heading
+                found_any_heading = True
+                replaced = True
+                break
+        if replaced:
+            continue
+
+        out.append(line)
+
+    return "\n".join(out).strip() + "\n"
 
 
 @app.get("/conversations")
@@ -319,7 +429,7 @@ async def send_message(conversation_id: str, body: SendMessageBody):
 
         resp = chat(model=body.model, messages=ollama_messages, stream=False)
 
-    assistant_text = resp.message.content
+    assistant_text = ensure_markdown(resp.message.content)
 
     # 3) Insert assistant + bump updated_at
     with get_conn() as conn, conn.cursor() as cur:
