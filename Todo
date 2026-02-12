@@ -7,5 +7,6 @@ Priority
 - Give files to LLM and make it reply about those files [done]
 - implement view attached files and crud [done]
 - Fix refresh of files after added  [done]
-- Improve reply format (Mobile friendly) [] -- maybe use Spacly
+- Improve reply format (Mobile friendly) [] -- maybe use Spacly or just better prompt eng
 - Implement voice mode [] 
+

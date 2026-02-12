@@ -3,6 +3,12 @@ import * as DocumentPicker from 'expo-document-picker'
 
 type Conversation = { id: string; title: string | null; updated_at: string };
 type Message = { id?: number; role: 'user' | 'assistant' | 'system' | 'error'; content: string; created_at?: string };
+type MessageIntent = 'summary' | 'study_plan' | 'practice_questions' | 'custom';
+type OutputMode = 'quick' | 'full' | 'study_ready';
+type SendMessageOptions = {
+    intent?: MessageIntent;
+    output_mode?: OutputMode;
+};
 
 export type ConversationFile = {
     id: number;
@@ -27,7 +33,7 @@ type DatabaseContextType = {
     deleteConversation: (conversationId: string) => Promise<Conversation>
     createConversation: (title?: string) => Promise<Conversation>;
     openConversation: (conversationId: string) => Promise<void>;
-    sendMessage: (text: string) => Promise<void>;
+    sendMessage: (text: string, opts?: SendMessageOptions) => Promise<void>;
 
     refreshConversationFiles: (conversationId: string) => Promise<void>;
     uploadConversationFiles: (conversationId: string) => Promise<void>;
@@ -244,7 +250,7 @@ export function DatabaseProvider({ children }: { children: React.ReactNode }) {
         },
         [refreshConversationFiles]
     );
-    const sendMessage = useCallback(async (text: string) => {
+    const sendMessage = useCallback(async (text: string, opts?: SendMessageOptions) => {
         const trimmed = text.trim();
         if (!trimmed) return;
 
@@ -263,7 +269,11 @@ export function DatabaseProvider({ children }: { children: React.ReactNode }) {
             const res = await fetch(`${API_BASE}/conversations/${convoId}/messages`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ content: trimmed }),
+                body: JSON.stringify({
+                    content: trimmed,
+                    intent: opts?.intent ?? 'custom',
+                    output_mode: opts?.output_mode ?? 'full',
+                }),
             });
 
             if (!res.ok) {

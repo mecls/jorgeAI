@@ -1,6 +1,6 @@
 import os
 import uuid
-from typing import Optional
+from typing import Literal, Optional
 import psycopg
 from fastapi import FastAPI, HTTPException, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
@@ -38,6 +38,10 @@ class CreateConversationBody(BaseModel):
 class SendMessageBody(BaseModel):
     content: str
     model: str = "qwen3:4b"
+    intent: Optional[
+        Literal["summary", "study_plan", "practice_questions", "custom"]
+    ] = None
+    output_mode: Optional[Literal["quick", "full", "study_ready"]] = None
 
 
 class EditConversationBody(BaseModel):
@@ -48,7 +52,8 @@ def extract_text_from_pptx(path: str) -> str:
     pres = Presentation(path)
     parts: list[str] = []
 
-    for slide in pres.slides:
+    for idx, slide in enumerate(pres.slides, start=1):
+        slide_parts: list[str] = []
         for shape in slide.shapes:
             sh = cast(Any, shape)  # Pylance workaround
             if not sh.has_text_frame:  # documented [web:935]
@@ -56,7 +61,10 @@ def extract_text_from_pptx(path: str) -> str:
 
             text = sh.text_frame.text  # documented [web:935]
             if text and text.strip():
-                parts.append(text.strip())
+                slide_parts.append(text.strip())
+
+        if slide_parts:
+            parts.append(f"SLIDE {idx}:\n" + "\n".join(slide_parts))
 
     return "\n\n".join(parts)
 
@@ -99,6 +107,66 @@ def build_files_context(conversation_id: str, max_chars: int = 12000) -> str:
 
     ctx = "\n\n---\n\n".join(blocks)
     return ctx[:max_chars]
+
+
+def build_system_prompt(
+    intent: Literal["summary", "study_plan", "practice_questions", "custom"],
+    output_mode: Literal["quick", "full", "study_ready"],
+    files_text: str,
+) -> str:
+    mode_rules = {
+        "quick": (
+            "Output mode: quick.\n"
+            "- Keep it compact and mobile-friendly.\n"
+            "- Use short bullet points.\n"
+            "- Include exactly 3 key takeaways.\n"
+            "- Include exactly 3 quick practice questions."
+        ),
+        "full": (
+            "Output mode: full.\n"
+            "- Use sections in this order: Summary, Key Concepts, Examples, Common Pitfalls, Practice Questions.\n"
+            "- Keep paragraphs short and scannable.\n"
+            "- Include 5 practice questions with concise answers."
+        ),
+        "study_ready": (
+            "Output mode: study_ready.\n"
+            "- Use sections in this order: Summary, 7-Day Study Plan, Flashcards, Quiz, Revision Checklist.\n"
+            "- Keep it practical and exam-focused.\n"
+            "- Flashcards should be Q/A pairs.\n"
+            "- Quiz should include answers and 1-line explanations."
+        ),
+    }
+
+    intent_rules = {
+        "summary": "Intent focus: prioritize a clean summary and major takeaways before anything else.",
+        "study_plan": "Intent focus: prioritize a concrete study plan with realistic pacing and milestones.",
+        "practice_questions": "Intent focus: prioritize high-quality exam-style questions and answers.",
+        "custom": "Intent focus: answer the user question directly and then add useful study follow-ups.",
+    }
+
+    grounding_rules = (
+        "You are a study assistant.\n"
+        "Grounding requirements:\n"
+        "- Base your answer on the uploaded files whenever possible.\n"
+        "- If information is missing from files, explicitly say what is missing.\n"
+        "- Do not invent slide content.\n"
+        "- When useful, reference slide numbers (e.g., SLIDE 3).\n"
+        "- End with 1-2 concise clarifying questions if user intent is ambiguous.\n"
+    )
+
+    files_block = (
+        files_text.strip() or "No attached files were found for this conversation."
+    )
+
+    return (
+        grounding_rules
+        + "\n"
+        + mode_rules[output_mode]
+        + "\n"
+        + intent_rules[intent]
+        + "\n\nCourse file context:\n"
+        + files_block
+    )
 
 
 @app.get("/conversations")
@@ -232,55 +300,26 @@ async def send_message(conversation_id: str, body: SendMessageBody):
         )
         ctx = list(reversed(cur.fetchall()))
         conn.commit()
-        # Load attached files
-        with get_conn() as conn, conn.cursor() as cur:
-            cur.execute(
-                """
-                SELECT filename, mime_type, storage_path
-                FROM conversation_files
-                WHERE conversation_id = %s
-                ORDER BY id ASC
-                """,
-                (conversation_id,),
-            )
-            files = cur.fetchall()
+        files_text = build_files_context(
+            conversation_id=conversation_id, max_chars=12000
+        )
 
-        blocks = []
-        for filename, mime, path in files:
-            text = ""
-            if (mime or "").startswith("application/pdf") or str(path).lower().endswith(
-                ".pdf"
-            ):
-                reader = PdfReader(str(path))  # [web:886]
-                text = "\n".join((page.extract_text() or "") for page in reader.pages)
-            elif (mime or "").endswith("presentationml.presentation") or str(
-                path
-            ).lower().endswith(".pptx"):
-                text = extract_text_from_pptx(str(path))
-
-            if text.strip():
-                blocks.append(f"FILE: {filename}\n{text.strip()}")
-
-        files_text = "\n\n---\n\n".join(blocks)[:12000]
+        intent = body.intent or "custom"
+        output_mode = body.output_mode or "full"
+        system_prompt = build_system_prompt(
+            intent=intent, output_mode=output_mode, files_text=files_text
+        )
 
         ollama_messages = [
             {"role": role, "content": content} for (role, content) in ctx
         ]
-        if files_text.strip():
-            ollama_messages = [
-                {
-                    "role": "system",
-                    "content": "You are a study assistant. Use the course files below as context.\n\n"
-                    + files_text,
-                }
-            ] + ollama_messages
+        ollama_messages = [
+            {"role": "system", "content": system_prompt}
+        ] + ollama_messages
 
-        resp = chat(
-            model=body.model, messages=ollama_messages, stream=False, think=True
-        )
+        resp = chat(model=body.model, messages=ollama_messages, stream=False)
 
     assistant_text = resp.message.content
-    print("files found:", len(files), "mimes:", [f[1] for f in files])
 
     # 3) Insert assistant + bump updated_at
     with get_conn() as conn, conn.cursor() as cur:
